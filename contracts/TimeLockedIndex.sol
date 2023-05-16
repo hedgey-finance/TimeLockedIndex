@@ -2,22 +2,24 @@
 pragma solidity 0.8.18;
 
 import '@openzeppelin/contracts/utils/Counters.sol';
-import './ERC721Delegate/ERC721Delegate.sol';
+import '@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol';
 import '@openzeppelin/contracts/security/ReentrancyGuard.sol';
-import '@openzeppelin/contracts/access/Ownable.sol';
 import './libraries/TransferHelper.sol';
 
-contract TimeLockedIndex is ERC721Delegate, ReentrancyGuard, Ownable {
+contract TimeLockedIndex is ERC721Enumerable, ReentrancyGuard {
   using Counters for Counters.Counter;
   Counters.Counter private _tokenIds;
   string private baseURI;
+
+  address private admin;
+  address private primaryMinter;
 
   mapping(address => bool) private minters;
 
   struct TimeLock {
     address token;
     uint256 amount;
-    uint256 unlockDate;
+    uint256 unlock;
   }
 
   mapping(uint256 => TimeLock) public timeLocks;
@@ -27,46 +29,71 @@ contract TimeLockedIndex is ERC721Delegate, ReentrancyGuard, Ownable {
     address indexed recipient,
     address token,
     uint256 amount,
-    uint256 unlockDate
+    uint256 unlock
   );
   event NFTRedeemed(uint256 indexed tokenId, address indexed holder, address token, uint256 amount);
   event URISet(string _uri);
+  event MinterAdded(address newMinter);
+  event MinterRemoved(address oldMinter);
+  event PrimaryMinterChanged(address newMinter);
 
   constructor(string memory name, string memory symbol, address minter) ERC721(name, symbol) {
+    admin = msg.sender;
+    primaryMinter = minter;
     minters[minter] = true;
   }
 
-  function updateBaseURI(string memory _uri) external onlyOwner {
+  modifier onlyPrimaryMinter() {
+    require(msg.sender == primaryMinter, '!primary');
+    _;
+  }
+
+  function updateBaseURI(string memory _uri) external {
+    require(msg.sender == admin, '!admin');
     baseURI = _uri;
     emit URISet(_uri);
   }
 
-  function addMinter(address minter) external onlyOwner {
-    minters[minter] = true;
+  function deleteAdmin() external {
+    require(msg.sender == admin, "!admin");
+    delete admin;
   }
 
-  function removeMinter(address minter) external onlyOwner {
+  function addMinter(address minter) external onlyPrimaryMinter {
+    minters[minter] = true;
+    emit MinterAdded(minter);
+  }
+
+  function removeMinter(address minter) external onlyPrimaryMinter {
     delete minters[minter];
+    emit MinterRemoved(minter);
+  }
+
+  function changePrimaryMinter(address _primaryMinter) external onlyPrimaryMinter {
+    delete minters[primaryMinter];
+    primaryMinter = _primaryMinter;
+    minters[_primaryMinter] = true;
+    emit PrimaryMinterChanged(_primaryMinter);
   }
 
   function createNFT(
     address recipient,
     address token,
     uint256 amount,
-    uint256 unlockDate
+    uint256 unlock
   ) external nonReentrant returns (uint256) {
     require(validMint(msg.sender, token));
-    require(validInput(recipient, amount, unlockDate));
+    require(validInput(recipient, amount, unlock));
     TransferHelper.transferTokens(token, msg.sender, address(this), amount);
     _tokenIds.increment();
     uint256 newItemId = _tokenIds.current();
     _safeMint(recipient, newItemId);
-    timeLocks[newItemId] = TimeLock(token, amount, unlockDate);
-    emit NFTCreated(newItemId, recipient, token, amount, unlockDate);
+    timeLocks[newItemId] = TimeLock(token, amount, unlock);
+    emit NFTCreated(newItemId, recipient, token, amount, unlock);
     return newItemId;
   }
 
-  function batchCreate(
+  function createNFTs(
     address[] memory recipients,
     address token,
     uint256[] memory amounts,
@@ -90,15 +117,11 @@ contract TimeLockedIndex is ERC721Delegate, ReentrancyGuard, Ownable {
   function redeemNFT(uint256 tokenId) external nonReentrant {
     require(ownerOf(tokenId) == msg.sender, '!owner');
     TimeLock memory tl = timeLocks[tokenId];
-    require(tl.unlockDate < block.timestamp && tl.amount > 0, 'Not redeemable');
+    require(tl.unlock < block.timestamp && tl.amount > 0, 'Not redeemable');
     _burn(tokenId);
     delete timeLocks[tokenId];
     TransferHelper.withdrawTokens(tl.token, msg.sender, tl.amount);
     emit NFTRedeemed(tokenId, msg.sender, tl.token, tl.amount);
-  }
-
-  function delegateNFT(address delegate, uint256 tokenId) external {
-    _delegateToken(delegate, tokenId);
   }
 
   function _baseURI() internal view override returns (string memory) {
@@ -108,13 +131,12 @@ contract TimeLockedIndex is ERC721Delegate, ReentrancyGuard, Ownable {
   function validInput(address recipient, uint256 amount, uint256 unlock) internal returns (bool) {
     require(recipient != address(0), 'zero address');
     require(amount > 0, 'zero amount');
-    require(unlock < block.timestamp + 1100 days, 'day guardrail');
     require(unlock > block.timestamp, '!future');
     return true;
   }
 
   function validMint(address minter, address token) internal returns (bool) {
-    require(minters[minter], 'not minter');
+    require(minters[minter], '!minter');
     require(token != address(0), 'zero_token');
     return true;
   }
@@ -122,15 +144,7 @@ contract TimeLockedIndex is ERC721Delegate, ReentrancyGuard, Ownable {
   function lockedBalances(address holder, address token) public view returns (uint256 lockedBalance) {
     uint256 holdersBalance = balanceOf(holder);
     for (uint256 i; i < holdersBalance; i++) {
-      uint256 tokenId = _tokenOfOwnerByIndex(holder, i);
-      if (timeLocks[tokenId].token == token) lockedBalance += timeLocks[tokenId].amount;
-    }
-  }
-
-  function delegatedBalances(address delegate, address token) public view returns (uint256 delegatedBalance) {
-    uint256 delegateBalance = balanceOfDelegate(delegate);
-    for (uint256 i; i < delegateBalance; i++) {
-      uint256 tokenId = tokenOfDelegateByIndex(delegate, i);
+      uint256 tokenId = tokenOfOwnerByIndex(holder, i);
       if (timeLocks[tokenId].token == token) lockedBalance += timeLocks[tokenId].amount;
     }
   }
