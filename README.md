@@ -33,3 +33,7 @@ Then you can use the below command in the terminal to send the transaction.
 ``` bash
 npx hardhat run scripts/methods.js -network <network-name>
 ```
+
+## Production Deployment: 
+
+Ethereum Mainnet: `0x2D36CBD450F2Fa33144373A57aF4AF1928a1D433`

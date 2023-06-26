@@ -12,9 +12,9 @@ contract TimeLockedIndex is ERC721Enumerable, ReentrancyGuard {
   string private baseURI;
 
   address private admin;
-  address private primaryMinter;
+  address public primaryMinter;
 
-  mapping(address => bool) private minters;
+  mapping(address => bool) public minters;
 
   struct TimeLock {
     address token;
