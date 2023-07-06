@@ -59,6 +59,11 @@ contract TimeLockedIndex is ERC721Enumerable, ReentrancyGuard {
     delete admin;
   }
 
+  function changeAdmin(address newAdmin) external {
+    require(msg.sender == admin, "!admin");
+    admin = newAdmin;
+  }
+
   function addMinter(address minter) external onlyPrimaryMinter {
     minters[minter] = true;
     emit MinterAdded(minter);
@@ -128,14 +133,14 @@ contract TimeLockedIndex is ERC721Enumerable, ReentrancyGuard {
     return baseURI;
   }
 
-  function validInput(address recipient, uint256 amount, uint256 unlock) internal returns (bool) {
+  function validInput(address recipient, uint256 amount, uint256 unlock) internal view returns (bool) {
     require(recipient != address(0), 'zero address');
     require(amount > 0, 'zero amount');
     require(unlock > block.timestamp, '!future');
     return true;
   }
 
-  function validMint(address minter, address token) internal returns (bool) {
+  function validMint(address minter, address token) internal view returns (bool) {
     require(minters[minter], '!minter');
     require(token != address(0), 'zero_token');
     return true;
